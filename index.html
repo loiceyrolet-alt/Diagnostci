@@ -6516,8 +6516,13 @@ function renderCoordEnsemble() {
 function renderCoordConseillers() {
   var data = getCoordData();
   var html = '<div style="max-width:1000px;margin:0 auto;padding:28px 32px">'
-    + '<h2 style="font-size:22px;font-weight:800;letter-spacing:-0.5px;margin-bottom:4px">👥 Conseillers</h2>'
-    + '<p style="font-size:13px;color:var(--texte2);margin-bottom:24px">' + data.conseillers.length + ' conseiller(s) · ' + data.total + ' dossier(s) au total</p>';
+    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">'
+    +   '<div>'
+    +     '<h2 style="font-size:22px;font-weight:800;letter-spacing:-0.5px;margin-bottom:4px">👥 Conseillers</h2>'
+    +     '<p style="font-size:13px;color:var(--texte2)">' + data.conseillers.length + ' conseiller(s) · ' + data.total + ' dossier(s) au total</p>'
+    +   '</div>'
+    +   '<button onclick="ouvrirGestionConseillers()" class="btn btn-primary btn-sm">+ Gérer les conseillers</button>'
+    + '</div>';
 
   if (data.conseillers.length === 0) {
     html += '<div class="info-box">Aucun conseiller enregistré.</div>';
@@ -6529,7 +6534,6 @@ function renderCoordConseillers() {
       var moy  = c.dossiers.length > 0 ? Math.round(c.dossiers.reduce(function(s,d){ return s+(d.scoreGlobal||0); },0)/c.dossiers.length) : 0;
 
       html += '<div style="background:white;border:1.5px solid var(--bord);border-radius:var(--r);margin-bottom:16px;overflow:hidden">'
-        // Header conseiller
         + '<div style="padding:16px 20px;background:var(--gris-bg);border-bottom:1.5px solid var(--bord);display:flex;align-items:center;gap:14px">'
         +   '<div style="width:44px;height:44px;border-radius:50%;background:var(--vert);color:white;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">👤</div>'
         +   '<div style="flex:1">'
@@ -6543,7 +6547,6 @@ function renderCoordConseillers() {
         +     miniStat(moy+'%', 'Score moy.', '#6366f1')
         +   '</div>'
         + '</div>'
-        // Dossiers du conseiller
         + '<table style="width:100%;border-collapse:collapse">'
         + '<thead><tr style="background:var(--vert-pale)"><th style="padding:7px 16px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--texte2)">Porteur</th><th style="padding:7px 16px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--texte2)">Projet</th><th style="padding:7px 16px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--texte2)">Secteur</th><th style="padding:7px 16px;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--texte2)">Score</th><th style="padding:7px 16px;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--texte2)">Statut</th><th style="padding:7px 16px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--texte2)">Modifié</th><th style="width:80px"></th></tr></thead>'
         + '<tbody>'
@@ -6564,6 +6567,114 @@ function renderCoordConseillers() {
   }
   html += '</div>';
   document.getElementById('coordContent').innerHTML = html;
+}
+
+// ---- Gestion des conseillers Supabase ----
+async function ouvrirGestionConseillers() {
+  var existing = document.getElementById('gestionConseillersOverlay');
+  if (existing) { existing.remove(); return; }
+
+  // Charger la liste depuis Supabase
+  var conseillers = [];
+  try {
+    conseillers = await sbGet('conseillers', { 'select': '*', 'order': 'nom.asc' });
+  } catch(e) {
+    conseillers = [];
+  }
+
+  var rows = conseillers.length === 0
+    ? '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--texte2)">Aucun conseiller</td></tr>'
+    : conseillers.map(function(c) {
+        return '<tr style="border-bottom:1px solid var(--bord)">'
+          + '<td style="padding:9px 14px;font-weight:600">' + (c.prenom||'') + ' ' + (c.nom||'') + '</td>'
+          + '<td style="padding:9px 14px"><code style="background:#eee;padding:2px 8px;border-radius:4px;font-size:12px">' + c.code + '</code></td>'
+          + '<td style="padding:9px 14px;font-size:12px;color:var(--texte2)">' + (c.email||'—') + '</td>'
+          + '<td style="padding:9px 14px;text-align:center">'
+          +   '<span style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:20px;background:' + (c.role==='coordinateur'?'#eef2ff':'var(--vert-pale)') + ';color:' + (c.role==='coordinateur'?'#6366f1':'var(--vert)') + '">'
+          +   (c.role==='coordinateur'?'🔑 Coordinateur':'👤 Conseiller') + '</span>'
+          + '</td>'
+          + '<td style="padding:9px 14px;text-align:center">'
+          +   '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:' + (c.actif?'#f0faf5':'#f5f5f5') + ';color:' + (c.actif?'#1a8a4a':'#aaa') + '">'
+          +   (c.actif ? '✅ Actif' : '⏸ Inactif') + '</span>'
+          + '</td>'
+          + '</tr>';
+      }).join('');
+
+  var overlay = document.createElement('div');
+  overlay.id  = 'gestionConseillersOverlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = function(e){ if(e.target===overlay) overlay.remove(); };
+
+  overlay.innerHTML = '<div style="background:white;border-radius:var(--r);width:100%;max-width:720px;max-height:80vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.2);display:flex;flex-direction:column">'
+    + '<div style="padding:20px 24px;border-bottom:1.5px solid var(--bord);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+    +   '<h3 style="font-size:17px;font-weight:800">👥 Gestion des conseillers</h3>'
+    +   '<button onclick="document.getElementById(\'gestionConseillersOverlay\').remove()" style="border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--texte2)">×</button>'
+    + '</div>'
+    // Tableau
+    + '<div style="overflow-y:auto;flex:1">'
+    +   '<table style="width:100%;border-collapse:collapse">'
+    +   '<thead><tr style="background:var(--vert-pale)">'
+    +     '<th style="padding:9px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--texte2)">Nom</th>'
+    +     '<th style="padding:9px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--texte2)">Code</th>'
+    +     '<th style="padding:9px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--texte2)">Email</th>'
+    +     '<th style="padding:9px 14px;text-align:center;font-size:11px;font-weight:700;color:var(--texte2)">Rôle</th>'
+    +     '<th style="padding:9px 14px;text-align:center;font-size:11px;font-weight:700;color:var(--texte2)">Statut</th>'
+    +   '</tr></thead>'
+    +   '<tbody>' + rows + '</tbody>'
+    +   '</table>'
+    + '</div>'
+    // Formulaire ajout
+    + '<div style="padding:20px 24px;border-top:1.5px solid var(--bord);background:var(--gris-bg);flex-shrink:0">'
+    +   '<h4 style="font-size:13px;font-weight:700;margin-bottom:14px">Ajouter un conseiller</h4>'
+    +   '<div style="display:grid;grid-template-columns:1fr 1fr 1fr auto auto;gap:10px;align-items:end">'
+    +     '<div><label style="font-size:11px;font-weight:700;color:var(--texte2);display:block;margin-bottom:4px">Prénom NOM</label>'
+    +       '<input type="text" id="newConsNom" placeholder="Dupont Marie" style="width:100%;padding:8px 10px;border:1.5px solid var(--bord);border-radius:6px;font-family:inherit;font-size:13px"></div>'
+    +     '<div><label style="font-size:11px;font-weight:700;color:var(--texte2);display:block;margin-bottom:4px">Email</label>'
+    +       '<input type="email" id="newConsEmail" placeholder="marie@amesud.fr" style="width:100%;padding:8px 10px;border:1.5px solid var(--bord);border-radius:6px;font-family:inherit;font-size:13px"></div>'
+    +     '<div><label style="font-size:11px;font-weight:700;color:var(--texte2);display:block;margin-bottom:4px">Rôle</label>'
+    +       '<select id="newConsRole" style="width:100%;padding:8px 10px;border:1.5px solid var(--bord);border-radius:6px;font-family:inherit;font-size:13px">'
+    +         '<option value="conseiller">Conseiller</option>'
+    +         '<option value="coordinateur">Coordinateur</option>'
+    +       '</select></div>'
+    +     '<button onclick="ajouterConseiller()" style="padding:9px 16px;border:none;border-radius:8px;background:var(--vert);color:white;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">+ Ajouter</button>'
+    +   '</div>'
+    +   '<div id="newConsAlert" style="margin-top:10px"></div>'
+    + '</div>'
+    + '</div>';
+
+  document.body.appendChild(overlay);
+}
+
+async function ajouterConseiller() {
+  var nomComplet = (document.getElementById('newConsNom').value || '').trim();
+  var email      = (document.getElementById('newConsEmail').value || '').trim();
+  var role       = document.getElementById('newConsRole').value;
+  var alertEl    = document.getElementById('newConsAlert');
+
+  if (!nomComplet) { alertEl.innerHTML = '<div class="warning-box">Veuillez saisir un nom.</div>'; return; }
+
+  // Générer un code unique
+  var parts = nomComplet.toUpperCase().replace(/[^A-Z ]/g,'').split(' ');
+  var base  = (parts[parts.length-1]||'X').slice(0,6) + Math.floor(Math.random()*100).toString().padStart(2,'0');
+  var code  = base.slice(0,8);
+
+  try {
+    await sbPost('conseillers', {
+      code:    code,
+      nom:     parts[parts.length-1] || nomComplet,
+      prenom:  parts.slice(0,-1).join(' ') || '',
+      email:   email,
+      role:    role,
+      actif:   true,
+    });
+    alertEl.innerHTML = '<div class="info-box">✅ Conseiller ajouté — Code : <strong>' + code + '</strong></div>';
+    document.getElementById('newConsNom').value   = '';
+    document.getElementById('newConsEmail').value = '';
+    // Recharger la liste
+    setTimeout(function(){ ouvrirGestionConseillers(); }, 1500);
+  } catch(e) {
+    alertEl.innerHTML = '<div class="danger-box">Erreur : ' + e.message + '</div>';
+  }
 }
 
 // ---- TOUS LES DOSSIERS ----
@@ -10158,15 +10269,43 @@ async function supabaseApi(action, data) {
 
   // ---- LOGIN CONSEILLER ----
   if (action === 'loginConseiller') {
-    var dossiers = await sbGet('dossiers', { 'code_conseiller': 'eq.' + data.code, 'select': '*', 'order': 'date_modification.desc' });
-    if (!dossiers || dossiers.length === 0) return { ok: false, error: 'Code conseiller invalide ou aucun dossier' };
-    return { ok: true, role: 'conseiller', dossiers: dossiers.map(dossiersFromSB) };
+    // Vérifier le code dans la table conseillers
+    var conseillers = await sbGet('conseillers', {
+      'code': 'eq.' + data.code,
+      'role': 'eq.conseiller',
+      'actif': 'eq.true',
+      'select': '*'
+    });
+    if (!conseillers || conseillers.length === 0) {
+      return { ok: false, error: 'Code conseiller invalide ou compte inactif' };
+    }
+    var conseiller = conseillers[0];
+    // Récupérer les dossiers de ce conseiller
+    var dossiers = await sbGet('dossiers', {
+      'code_conseiller': 'eq.' + data.code,
+      'select': '*',
+      'order': 'date_modification.desc'
+    });
+    return {
+      ok: true,
+      role: 'conseiller',
+      dossiers: (dossiers||[]).map(dossiersFromSB),
+      conseillerNom: conseiller.prenom + ' ' + conseiller.nom,
+      conseillerEmail: conseiller.email,
+    };
   }
 
   // ---- LOGIN COORDINATEUR ----
   if (action === 'loginCoordinateur') {
-    if (data.code !== 'COORD1' && (typeof COORD_CODE === 'undefined' || data.code !== COORD_CODE)) {
-      return { ok: false, error: 'Code coordinateur invalide' };
+    // Vérifier le code dans la table conseillers (role = coordinateur)
+    var coords = await sbGet('conseillers', {
+      'code': 'eq.' + data.code,
+      'role': 'eq.coordinateur',
+      'actif': 'eq.true',
+      'select': '*'
+    });
+    if (!coords || coords.length === 0) {
+      return { ok: false, error: 'Code coordinateur invalide ou compte inactif' };
     }
     var allDossiers = await sbGet('dossiers', { 'select': '*', 'order': 'date_modification.desc' });
     return { ok: true, role: 'coordinateur', dossiers: (allDossiers||[]).map(dossiersFromSB) };
