@@ -2704,7 +2704,6 @@ async function loginConseiller() {
     var userId = authData.user && authData.user.id;
     var conseillerRes = await sbGet('conseillers', {
       'auth_id': 'eq.' + userId,
-      'actif':   'eq.true',
       'select':  '*',
     });
 
@@ -6475,7 +6474,6 @@ async function loginCoordinateur() {
 
     var coordRes = await sbGet('conseillers', {
       'auth_id': 'eq.' + userId,
-      'actif':   'eq.true',
       'select':  '*',
     });
     console.log('[AMESUD] conseillers trouvés:', JSON.stringify(coordRes));
