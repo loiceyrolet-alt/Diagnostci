@@ -6471,15 +6471,18 @@ async function loginCoordinateur() {
 
     // 2. Vérifier que c'est bien un coordinateur
     var userId = authData.user && authData.user.id;
+    console.log('[AMESUD] Auth OK — userId:', userId);
+
     var coordRes = await sbGet('conseillers', {
       'auth_id': 'eq.' + userId,
       'actif':   'eq.true',
       'select':  '*',
     });
+    console.log('[AMESUD] conseillers trouvés:', JSON.stringify(coordRes));
 
     if (!coordRes || coordRes.length === 0) {
       hideLoading();
-      showAlert('alertCoordinateur', 'Compte non autorisé.');
+      showAlert('alertCoordinateur', 'Compte non autorisé. UserId: ' + userId);
       return;
     }
 
@@ -11833,8 +11836,8 @@ function cacheInvalidate(key) {
 var _origSbGet = sbGet;
 sbGet = async function(table, params) {
   var key = table + ':' + JSON.stringify(params||{});
-  // Ne cacher que les lectures non critiques
-  var cacheable = ['conseillers'].includes(table);
+  // Ne cacher que les lectures non critiques — PAS conseillers (auth critique)
+  var cacheable = false; // désactivé temporairement
   if (cacheable) {
     var cached = cacheGet(key);
     if (cached) return cached;
