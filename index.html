@@ -10579,6 +10579,1259 @@ async function migrerLocalStorageVersSupabase() {
   showSaveIndicator('✅ Migration Supabase terminée');
 }
 
+
+
+// ============================================================
+// AMÉLIORATIONS V2
+// ============================================================
+// ============================================================
+// AMÉLIORATIONS V2
+// 1. Désactiver/modifier un conseiller
+// 2. Email automatique porteur (Supabase Edge Functions / prep)
+// 3. Dashboard conseiller avec graphiques Chart.js
+// 4. Historique des connexions
+// 5. Export Word diagnostic
+// 6. Comparaison dossiers
+// 7. Notifications temps réel Supabase
+// 8. RLS Supabase (SQL uniquement - prep côté app)
+// 9. Mode hors-ligne amélioré
+// 10. Tests non-régression
+// ============================================================
+
+// ============================================================
+// 1. DÉSACTIVER / MODIFIER UN CONSEILLER
+// ============================================================
+
+async function toggleConseillerActif(conseillerCode, actifActuel) {
+  if (!confirm('Êtes-vous sûr de vouloir ' + (actifActuel ? 'désactiver' : 'réactiver') + ' ce conseiller ?')) return;
+  try {
+    await sbPatch('conseillers', { 'code': 'eq.' + conseillerCode }, { actif: !actifActuel });
+    showSaveIndicator('✅ Conseiller ' + (actifActuel ? 'désactivé' : 'réactivé'));
+    ouvrirGestionConseillers();
+  } catch(e) {
+    alert('Erreur : ' + e.message);
+  }
+}
+
+async function modifierConseillerCode(conseillerCode) {
+  var nouveau = prompt('Nouveau code pour ce conseiller (8 caractères) :', conseillerCode);
+  if (!nouveau || nouveau.trim().length < 4) return;
+  nouveau = nouveau.trim().toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,10);
+  try {
+    await sbPatch('conseillers', { 'code': 'eq.' + conseillerCode }, { code: nouveau });
+    showSaveIndicator('✅ Code modifié → ' + nouveau);
+    ouvrirGestionConseillers();
+  } catch(e) {
+    alert('Erreur : ' + e.message);
+  }
+}
+
+async function supprimerConseiller(conseillerCode, nom) {
+  if (!confirm('Supprimer définitivement ' + nom + ' ?\n\nSes dossiers ne seront pas supprimés.')) return;
+  try {
+    var res = await fetch(SUPABASE_URL + '/rest/v1/conseillers?code=eq.' + encodeURIComponent(conseillerCode), {
+      method: 'DELETE',
+      headers: SB_HEADERS,
+    });
+    if (!res.ok) throw new Error('Erreur suppression');
+    showSaveIndicator('✅ Conseiller supprimé');
+    ouvrirGestionConseillers();
+  } catch(e) {
+    alert('Erreur : ' + e.message);
+  }
+}
+
+// Override ouvrirGestionConseillers pour ajouter les actions
+var _origOuvrirGestionConseillers = ouvrirGestionConseillers;
+ouvrirGestionConseillers = async function() {
+  var existing = document.getElementById('gestionConseillersOverlay');
+  if (existing) { existing.remove(); return; }
+
+  var conseillers = [];
+  try {
+    conseillers = await sbGet('conseillers', { 'select': '*', 'order': 'nom.asc' });
+  } catch(e) { conseillers = []; }
+
+  var rows = conseillers.length === 0
+    ? '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--texte2)">Aucun conseiller</td></tr>'
+    : conseillers.map(function(c) {
+        var nomComplet = ((c.prenom||'') + ' ' + (c.nom||'')).trim();
+        return '<tr style="border-bottom:1px solid var(--bord)">'
+          + '<td style="padding:9px 14px;font-weight:600">' + nomComplet + '</td>'
+          + '<td style="padding:9px 14px"><code style="background:#eee;padding:2px 8px;border-radius:4px;font-size:12px">' + c.code + '</code></td>'
+          + '<td style="padding:9px 14px;font-size:12px;color:var(--texte2)">' + (c.email||'—') + '</td>'
+          + '<td style="padding:9px 14px;text-align:center">'
+          +   '<span style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:20px;background:' + (c.role==='coordinateur'?'#eef2ff':'var(--vert-pale)') + ';color:' + (c.role==='coordinateur'?'#6366f1':'var(--vert)') + '">'
+          +   (c.role==='coordinateur'?'🔑 Coord.':'👤 Conseiller') + '</span>'
+          + '</td>'
+          + '<td style="padding:9px 14px;text-align:center">'
+          +   '<button onclick="toggleConseillerActif(\'' + c.code + '\',' + c.actif + ')" style="border:none;border-radius:20px;padding:3px 10px;font-size:10px;font-weight:700;cursor:pointer;background:' + (c.actif?'#f0faf5':'#f5f5f5') + ';color:' + (c.actif?'#1a8a4a':'#aaa') + '">'
+          +   (c.actif ? '✅ Actif' : '⏸ Inactif') + '</button>'
+          + '</td>'
+          + '<td style="padding:9px 10px;text-align:right;display:flex;gap:4px;justify-content:flex-end">'
+          +   '<button onclick="modifierConseillerCode(\'' + c.code + '\')" title="Modifier le code" style="border:1.5px solid var(--bord);border-radius:6px;padding:4px 8px;background:white;cursor:pointer;font-size:11px">✏️</button>'
+          +   '<button onclick="supprimerConseiller(\'' + c.code + '\',\'' + nomComplet + '\')" title="Supprimer" style="border:1.5px solid #fcc;border-radius:6px;padding:4px 8px;background:white;cursor:pointer;font-size:11px;color:#c0392b">🗑️</button>'
+          + '</td>'
+          + '</tr>';
+      }).join('');
+
+  var overlay = document.createElement('div');
+  overlay.id  = 'gestionConseillersOverlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = function(e){ if(e.target===overlay) overlay.remove(); };
+
+  overlay.innerHTML = '<div style="background:white;border-radius:var(--r);width:100%;max-width:760px;max-height:85vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.2);display:flex;flex-direction:column">'
+    + '<div style="padding:18px 24px;border-bottom:1.5px solid var(--bord);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+    +   '<h3 style="font-size:17px;font-weight:800">👥 Gestion des conseillers</h3>'
+    +   '<button onclick="document.getElementById(\'gestionConseillersOverlay\').remove()" style="border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--texte2)">×</button>'
+    + '</div>'
+    + '<div style="overflow-y:auto;flex:1">'
+    +   '<table style="width:100%;border-collapse:collapse">'
+    +   '<thead><tr style="background:var(--vert-pale)">'
+    +     '<th style="padding:9px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--texte2)">Nom</th>'
+    +     '<th style="padding:9px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--texte2)">Code</th>'
+    +     '<th style="padding:9px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--texte2)">Email</th>'
+    +     '<th style="padding:9px 14px;text-align:center;font-size:11px;font-weight:700;color:var(--texte2)">Rôle</th>'
+    +     '<th style="padding:9px 14px;text-align:center;font-size:11px;font-weight:700;color:var(--texte2)">Statut</th>'
+    +     '<th style="padding:9px 14px;text-align:right;font-size:11px;font-weight:700;color:var(--texte2)">Actions</th>'
+    +   '</tr></thead>'
+    +   '<tbody>' + rows + '</tbody>'
+    +   '</table>'
+    + '</div>'
+    + '<div style="padding:18px 24px;border-top:1.5px solid var(--bord);background:var(--gris-bg);flex-shrink:0">'
+    +   '<h4 style="font-size:13px;font-weight:700;margin-bottom:12px">➕ Ajouter un conseiller</h4>'
+    +   '<div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;flex-wrap:wrap">'
+    +     '<div><label style="font-size:11px;font-weight:700;color:var(--texte2);display:block;margin-bottom:4px">Prénom NOM</label>'
+    +       '<input type="text" id="newConsNom" placeholder="Marie DUPONT" style="width:100%;padding:8px 10px;border:1.5px solid var(--bord);border-radius:6px;font-family:inherit;font-size:13px"></div>'
+    +     '<div><label style="font-size:11px;font-weight:700;color:var(--texte2);display:block;margin-bottom:4px">Email</label>'
+    +       '<input type="email" id="newConsEmail" placeholder="marie@amesud.fr" style="width:100%;padding:8px 10px;border:1.5px solid var(--bord);border-radius:6px;font-family:inherit;font-size:13px"></div>'
+    +     '<div><label style="font-size:11px;font-weight:700;color:var(--texte2);display:block;margin-bottom:4px">Rôle</label>'
+    +       '<select id="newConsRole" style="width:100%;padding:9px 10px;border:1.5px solid var(--bord);border-radius:6px;font-family:inherit;font-size:13px">'
+    +         '<option value="conseiller">Conseiller</option>'
+    +         '<option value="coordinateur">Coordinateur</option>'
+    +       '</select></div>'
+    +     '<button onclick="ajouterConseiller()" style="padding:9px 18px;border:none;border-radius:8px;background:var(--vert);color:white;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">+ Ajouter</button>'
+    +   '</div>'
+    +   '<div id="newConsAlert" style="margin-top:10px"></div>'
+    + '</div>'
+    + '</div>';
+
+  document.body.appendChild(overlay);
+};
+
+// ============================================================
+// 2. EMAIL AUTOMATIQUE AU PORTEUR (préparation)
+// ============================================================
+
+async function envoyerEmailCodePorteur(dossierId) {
+  var stored = JSON.parse(localStorage.getItem('amesud_demo') || '{"dossiers":{}}');
+  var d = stored.dossiers[dossierId];
+  if (!d) {
+    // Chercher dans Supabase
+    try {
+      var rows = await sbGet('dossiers', { 'id': 'eq.' + dossierId, 'select': '*' });
+      if (rows && rows.length) d = dossiersFromSB(rows[0]);
+    } catch(e) {}
+  }
+  if (!d || !d.emailPorteur) {
+    alert('Pas d\'email renseigné pour ce porteur.');
+    return;
+  }
+
+  // Préparer le contenu de l'email
+  var sujet  = 'AMESUD — Votre accès au diagnostic création d\'entreprise';
+  var corps  = 'Bonjour ' + d.prenomPorteur + ',\n\n'
+    + 'Votre conseiller AMESUD a créé votre espace de diagnostic en ligne.\n\n'
+    + '🔑 Votre code d\'accès : ' + d.codePorteur + '\n\n'
+    + '📱 Accédez à votre diagnostic : https://loiceyrolet-alt.github.io/Diagnostci/\n\n'
+    + '➡️ Cliquez sur "Je suis porteur" et saisissez votre code.\n\n'
+    + 'En cas de question, contactez votre conseiller.\n\n'
+    + 'Cordialement,\nL\'équipe AMESUD';
+
+  // Si GAS_URL configuré, envoyer via GAS
+  if (typeof GAS_URL !== 'undefined' && GAS_URL) {
+    try {
+      await api('sendEmailCode', { email: d.emailPorteur, code: d.codePorteur, nomPorteur: d.prenomPorteur, corps: corps });
+      showSaveIndicator('✅ Email envoyé à ' + d.emailPorteur);
+      return;
+    } catch(e) {}
+  }
+
+  // Sinon : ouvrir le client mail local
+  var mailto = 'mailto:' + encodeURIComponent(d.emailPorteur)
+    + '?subject=' + encodeURIComponent(sujet)
+    + '&body=' + encodeURIComponent(corps);
+  window.open(mailto);
+  showSaveIndicator('📧 Client mail ouvert');
+}
+
+// ============================================================
+// 3. GRAPHIQUES CHART.JS DANS LE DASHBOARD CONSEILLER
+// ============================================================
+
+function injecterGraphiquesDashboard(all) {
+  chargerChartJS(function() {
+    // Graphique répartition statuts (donut)
+    var canvasStatut = document.getElementById('chartDashStatut');
+    if (canvasStatut) {
+      if (canvasStatut._chart) canvasStatut._chart.destroy();
+      var parStatut = {
+        'En cours': all.filter(function(d){ return d.statut==='En cours'; }).length,
+        'Complet':  all.filter(function(d){ return d.statut==='Complet'; }).length,
+        'Validé':   all.filter(function(d){ return d.statut==='Validé'; }).length,
+        'Archivé':  all.filter(function(d){ return d.statut==='Archivé'; }).length,
+      };
+      canvasStatut._chart = new Chart(canvasStatut.getContext('2d'), {
+        type: 'doughnut',
+        data: {
+          labels: Object.keys(parStatut),
+          datasets: [{
+            data: Object.values(parStatut),
+            backgroundColor: ['#f39c12','#0891b2','#1a8a4a','#aaa'],
+            borderWidth: 2,
+            borderColor: 'white',
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { font: { family: 'Raleway', size: 11 }, padding: 12 } },
+            tooltip: { callbacks: { label: function(c) { return c.label + ' : ' + c.parsed + ' dossier(s)'; } } }
+          },
+          cutout: '65%',
+        }
+      });
+    }
+
+    // Graphique évolution mensuelle (line)
+    var canvasEvol = document.getElementById('chartDashEvol');
+    if (canvasEvol && all.length > 0) {
+      if (canvasEvol._chart) canvasEvol._chart.destroy();
+      var moisLabels = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+      var maintenant = new Date();
+      var evolData   = new Array(6).fill(0);
+      var evolLabels = [];
+      for (var i = 5; i >= 0; i--) {
+        var d2 = new Date(maintenant.getFullYear(), maintenant.getMonth() - i, 1);
+        evolLabels.push(moisLabels[d2.getMonth()]);
+        var yr = d2.getFullYear(), mo = d2.getMonth();
+        evolData[5-i] = all.filter(function(d) {
+          if (!d.dateCreation) return false;
+          var dc = new Date(d.dateCreation);
+          return dc.getFullYear() === yr && dc.getMonth() === mo;
+        }).length;
+      }
+      canvasEvol._chart = new Chart(canvasEvol.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: evolLabels,
+          datasets: [{
+            label: 'Dossiers créés',
+            data: evolData,
+            borderColor: '#00a4a7',
+            backgroundColor: 'rgba(0,164,167,0.1)',
+            fill: true,
+            tension: 0.4,
+            pointRadius: 5,
+            pointBackgroundColor: '#00a4a7',
+            pointBorderColor: 'white',
+            pointBorderWidth: 2,
+            borderWidth: 2.5,
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { display: false }, ticks: { font: { family: 'Raleway', size: 11 } } },
+            y: { grid: { color: 'rgba(0,0,0,0.06)' }, ticks: { stepSize: 1, font: { family: 'JetBrains Mono', size: 11 } }, min: 0 }
+          }
+        }
+      });
+    }
+  });
+}
+
+// Hook sur renderDashboard pour injecter les graphiques
+var _origRenderDashboard = renderDashboard;
+renderDashboard = function() {
+  _origRenderDashboard();
+  var all = state.dossiers || [];
+
+  // Injecter les canvas graphiques dans le dashboard
+  var dashContent = document.getElementById('dashboardContent');
+  if (!dashContent) return;
+
+  // Vérifier si les canvas existent déjà
+  if (dashContent.querySelector('#chartDashStatut')) {
+    injecterGraphiquesDashboard(all);
+    return;
+  }
+
+  // Insérer les graphiques après les KPI
+  var kpiRow = dashContent.querySelector('.dashboard-kpi-row');
+  if (!kpiRow) return;
+
+  var graphSection = document.createElement('div');
+  graphSection.style.cssText = 'display:grid;grid-template-columns:1fr 2fr;gap:16px;margin-bottom:20px';
+  graphSection.innerHTML = '<div style="background:white;border:1.5px solid var(--bord);border-radius:var(--r);padding:16px">'
+    +   '<h4 style="font-size:13px;font-weight:700;margin-bottom:12px">Répartition par statut</h4>'
+    +   '<div style="position:relative;height:180px"><canvas id="chartDashStatut"></canvas></div>'
+    + '</div>'
+    + '<div style="background:white;border:1.5px solid var(--bord);border-radius:var(--r);padding:16px">'
+    +   '<h4 style="font-size:13px;font-weight:700;margin-bottom:12px">Évolution — 6 derniers mois</h4>'
+    +   '<div style="position:relative;height:180px"><canvas id="chartDashEvol"></canvas></div>'
+    + '</div>';
+
+  kpiRow.parentNode.insertBefore(graphSection, kpiRow.nextSibling);
+  setTimeout(function(){ injecterGraphiquesDashboard(all); }, 100);
+};
+
+// ============================================================
+// 4. HISTORIQUE DES CONNEXIONS
+// ============================================================
+
+async function loggerConnexion(role, code) {
+  try {
+    // Stocker localement
+    var logs = JSON.parse(localStorage.getItem('amesud_connexions') || '[]');
+    logs.unshift({ date: new Date().toISOString(), role: role, code: code });
+    if (logs.length > 50) logs = logs.slice(0, 50);
+    localStorage.setItem('amesud_connexions', JSON.stringify(logs));
+
+    // Si Supabase disponible, logger en base
+    if (SUPABASE_URL && SUPABASE_KEY) {
+      await sbPost('journal', {
+        dossier_id: null,
+        action:     'Connexion ' + role,
+        detail:     'Code : ' + code,
+        created_at: new Date().toISOString(),
+      }).catch(function(){});
+    }
+  } catch(e) {}
+}
+
+// Hook sur les logins
+var _origLoginConseiller = loginConseiller;
+loginConseiller = async function() {
+  await _origLoginConseiller();
+  if (state.role === 'conseiller') {
+    var code = document.getElementById('codeConseillerInput')?.value || '';
+    loggerConnexion('conseiller', code);
+  }
+};
+
+var _origLoginCoordinateur = loginCoordinateur;
+loginCoordinateur = async function() {
+  await _origLoginCoordinateur();
+  if (state.role === 'coordinateur') {
+    var code = document.getElementById('codeCoordinateurInput')?.value || '';
+    loggerConnexion('coordinateur', code);
+  }
+};
+
+// ============================================================
+// 5. EXPORT WORD (HTML → téléchargement .doc)
+// ============================================================
+
+function exporterDiagnosticWord() {
+  var d = state.dossier;
+  if (!d) return;
+
+  var date = new Date().toLocaleDateString('fr-FR', {day:'numeric', month:'long', year:'numeric'});
+
+  // Sections avec réponses
+  var sectionsHtml = state.sections.map(function(s) {
+    var questionsHtml = s.questions.map(function(q) {
+      var r = state.reponses[q.id];
+      var rep = r && r.reponse ? String(r.reponse) : '';
+      if (!rep.trim()) return '';
+      try { var arr = JSON.parse(rep); if (Array.isArray(arr)) rep = arr.join(', '); } catch(e) {}
+      return '<p style="margin:4px 0 8px 20px"><b>' + q.question + '</b><br>' + rep.replace(/\n/g,'<br>') + '</p>';
+    }).join('');
+    if (!questionsHtml) return '';
+    return '<h2 style="color:#00a4a7;border-bottom:2px solid #00a4a7;padding-bottom:6px">'
+      + s.icone + ' ' + s.titre + '</h2>' + questionsHtml;
+  }).join('');
+
+  var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">'
+    + '<head><meta charset="UTF-8">'
+    + '<style>body{font-family:Arial,sans-serif;font-size:12pt;line-height:1.6;margin:2cm}'
+    + 'h1{color:#00a4a7;font-size:18pt} h2{font-size:14pt;margin-top:20pt}'
+    + 'p{margin:6pt 0} table{width:100%;border-collapse:collapse}'
+    + 'td,th{border:1px solid #ccc;padding:6pt}</style></head><body>'
+    + '<h1>📋 Diagnostic Création d\'Entreprise — AMESUD</h1>'
+    + '<table style="margin-bottom:20pt"><tr>'
+    +   '<td><b>Porteur</b></td><td>' + d.prenomPorteur + ' ' + d.nomPorteur + '</td>'
+    +   '<td><b>Projet</b></td><td>' + (d.nomProjet||'—') + '</td>'
+    + '</tr><tr>'
+    +   '<td><b>Secteur</b></td><td>' + (d.secteur||'—') + '</td>'
+    +   '<td><b>Conseiller</b></td><td>' + (d.conseillerNom||'—') + '</td>'
+    + '</tr><tr>'
+    +   '<td><b>Date</b></td><td>' + date + '</td>'
+    +   '<td><b>Statut</b></td><td>' + (d.statut||'—') + '</td>'
+    + '</tr></table>'
+    + sectionsHtml
+    + '</body></html>';
+
+  var blob = new Blob(['\uFEFF' + html], { type: 'application/msword' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'Diagnostic_' + d.nomPorteur + '_' + d.prenomPorteur + '_' + new Date().toISOString().slice(0,10) + '.doc';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showSaveIndicator('✅ Document Word exporté');
+}
+
+// ============================================================
+// 6. COMPARAISON DE DOSSIERS
+// ============================================================
+
+var _dossiersSelectionnes = [];
+
+function ouvrirComparaisonDossiers() {
+  var dossiers = state.dossiers || [];
+  if (dossiers.length < 2) { alert('Vous devez avoir au moins 2 dossiers pour comparer.'); return; }
+
+  _dossiersSelectionnes = [];
+
+  var dossiersHtml = dossiers.slice(0, 10).map(function(d) {
+    return '<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid var(--bord);border-radius:8px;cursor:pointer;margin-bottom:8px;transition:all 0.15s" '
+      + 'onmouseover="this.style.borderColor=\'var(--vert)\'" onmouseout="if(!this.querySelector(\'input\').checked)this.style.borderColor=\'var(--bord)\'">'
+      + '<input type="checkbox" value="' + d.id + '" style="width:16px;height:16px;accent-color:var(--vert)" onchange="toggleSelectionDossier(\'' + d.id + '\',this.checked,this.closest(\'label\'))">'
+      + '<div style="flex:1">'
+      +   '<div style="font-size:13px;font-weight:700">' + d.prenomPorteur + ' ' + d.nomPorteur + '</div>'
+      +   '<div style="font-size:11px;color:var(--texte2)">' + (d.nomProjet||'—') + ' · ' + (d.secteur||'—') + '</div>'
+      + '</div>'
+      + '<span style="font-size:12px;font-weight:700;color:var(--vert)">' + (d.scoreGlobal||0) + '%</span>'
+      + '</label>';
+  }).join('');
+
+  var overlay = document.createElement('div');
+  overlay.id  = 'comparaisonOverlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = function(e){ if(e.target===overlay) overlay.remove(); };
+
+  overlay.innerHTML = '<div style="background:white;border-radius:var(--r);width:100%;max-width:520px;max-height:80vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.2);display:flex;flex-direction:column">'
+    + '<div style="padding:18px 24px;border-bottom:1.5px solid var(--bord);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+    +   '<div><h3 style="font-size:17px;font-weight:800;margin-bottom:3px">🔀 Comparer des dossiers</h3>'
+    +   '<p style="font-size:12px;color:var(--texte2)">Sélectionnez 2 ou 3 dossiers à comparer</p></div>'
+    +   '<button onclick="document.getElementById(\'comparaisonOverlay\').remove()" style="border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--texte2)">×</button>'
+    + '</div>'
+    + '<div style="overflow-y:auto;flex:1;padding:16px 20px">' + dossiersHtml + '</div>'
+    + '<div style="padding:16px 20px;border-top:1.5px solid var(--bord);display:flex;gap:10px;flex-shrink:0">'
+    +   '<button onclick="document.getElementById(\'comparaisonOverlay\').remove()" style="flex:1;padding:11px;border:1.5px solid var(--bord);border-radius:8px;background:white;font-family:inherit;font-size:13px;cursor:pointer">Annuler</button>'
+    +   '<button onclick="lancerComparaison()" style="flex:2;padding:11px;border:none;border-radius:8px;background:var(--vert);color:white;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer">🔀 Comparer</button>'
+    + '</div>'
+    + '</div>';
+
+  document.body.appendChild(overlay);
+}
+
+function toggleSelectionDossier(id, checked, label) {
+  if (checked) {
+    if (_dossiersSelectionnes.length >= 3) {
+      alert('Maximum 3 dossiers à comparer.');
+      label.querySelector('input').checked = false;
+      return;
+    }
+    _dossiersSelectionnes.push(id);
+    label.style.borderColor = 'var(--vert)';
+    label.style.background  = 'var(--vert-pale)';
+  } else {
+    _dossiersSelectionnes = _dossiersSelectionnes.filter(function(i){ return i !== id; });
+    label.style.borderColor = 'var(--bord)';
+    label.style.background  = 'white';
+  }
+}
+
+function lancerComparaison() {
+  if (_dossiersSelectionnes.length < 2) { alert('Sélectionnez au moins 2 dossiers.'); return; }
+  document.getElementById('comparaisonOverlay')?.remove();
+
+  var dossiers = _dossiersSelectionnes.map(function(id) {
+    return state.dossiers.find(function(d){ return d.id === id; });
+  }).filter(Boolean);
+
+  // Calculer les sections pour chaque dossier
+  var cols = dossiers.map(function(d) {
+    return state.sections.map(function(s) {
+      // Récupérer les réponses de ce dossier depuis le localStorage
+      var stored = JSON.parse(localStorage.getItem('amesud_demo') || '{"reponses":{}}');
+      var reps   = stored.reponses && stored.reponses[d.id] ? stored.reponses[d.id] : {};
+      var answered = s.questions.filter(function(q){ var r = reps[q.id]; return r && r.reponse && String(r.reponse).trim(); }).length;
+      var pct = s.questions.length > 0 ? Math.round(answered / s.questions.length * 100) : 0;
+      return { titre: s.titre, icone: s.icone, answered: answered, total: s.questions.length, pct: pct };
+    });
+  });
+
+  // Générer le tableau de comparaison
+  var headerCols = dossiers.map(function(d) {
+    return '<th style="padding:12px 16px;text-align:center;font-weight:700;min-width:140px">'
+      + '<div>' + d.prenomPorteur + ' ' + d.nomPorteur + '</div>'
+      + '<div style="font-size:11px;color:var(--texte2);font-weight:400;margin-top:2px">' + (d.nomProjet||'—') + '</div>'
+      + '<div style="font-size:18px;font-weight:800;color:var(--vert);margin-top:4px">' + (d.scoreGlobal||0) + '%</div>'
+      + '</th>';
+  }).join('');
+
+  var sectionsRows = state.sections.map(function(s, si) {
+    var cells = cols.map(function(col) {
+      var sc = col[si];
+      var color = sc.pct === 100 ? '#1a8a4a' : sc.pct > 0 ? '#856404' : '#aaa';
+      return '<td style="padding:10px 16px;text-align:center">'
+        + '<div style="font-weight:700;color:' + color + '">' + sc.pct + '%</div>'
+        + '<div style="font-size:10px;color:var(--texte2)">' + sc.answered + '/' + sc.total + '</div>'
+        + '<div style="background:var(--bord);border-radius:20px;height:4px;margin-top:4px"><div style="height:100%;width:' + sc.pct + '%;background:' + color + ';border-radius:20px"></div></div>'
+        + '</td>';
+    }).join('');
+    return '<tr style="border-bottom:1px solid var(--bord)">'
+      + '<td style="padding:10px 16px;font-weight:600">' + s.icone + ' ' + s.titre + '</td>'
+      + cells
+      + '</tr>';
+  }).join('');
+
+  var overlay = document.createElement('div');
+  overlay.id  = 'comparaisonResultatOverlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = function(e){ if(e.target===overlay) overlay.remove(); };
+
+  overlay.innerHTML = '<div style="background:white;border-radius:var(--r);width:100%;max-width:800px;max-height:85vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.2);display:flex;flex-direction:column">'
+    + '<div style="padding:18px 24px;border-bottom:1.5px solid var(--bord);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+    +   '<h3 style="font-size:17px;font-weight:800">🔀 Comparaison des dossiers</h3>'
+    +   '<button onclick="document.getElementById(\'comparaisonResultatOverlay\').remove()" style="border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--texte2)">×</button>'
+    + '</div>'
+    + '<div style="overflow:auto;flex:1">'
+    +   '<table style="width:100%;border-collapse:collapse;min-width:500px">'
+    +   '<thead><tr style="background:var(--vert-pale)">'
+    +     '<th style="padding:12px 16px;text-align:left;font-weight:700;min-width:140px">Section</th>'
+    +     headerCols
+    +   '</tr></thead>'
+    +   '<tbody>' + sectionsRows + '</tbody>'
+    +   '</table>'
+    + '</div>'
+    + '</div>';
+
+  document.body.appendChild(overlay);
+}
+
+// ============================================================
+// 7. NOTIFICATIONS TEMPS RÉEL SUPABASE
+// ============================================================
+
+var _supabaseChannel = null;
+
+function initSupabaseRealtime() {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return;
+  if (state.role !== 'conseiller' && state.role !== 'coordinateur') return;
+
+  // Utiliser l'API Realtime de Supabase via WebSocket
+  try {
+    var wsUrl = SUPABASE_URL.replace('https://', 'wss://') + '/realtime/v1/websocket?apikey=' + SUPABASE_KEY + '&vsn=1.0.0';
+    _supabaseChannel = new WebSocket(wsUrl);
+
+    _supabaseChannel.onopen = function() {
+      // S'abonner aux changements sur la table dossiers
+      _supabaseChannel.send(JSON.stringify({
+        topic: 'realtime:public:dossiers',
+        event: 'phx_join',
+        payload: {},
+        ref: '1'
+      }));
+    };
+
+    _supabaseChannel.onmessage = function(e) {
+      try {
+        var msg = JSON.parse(e.data);
+        if (msg.event === 'INSERT' || msg.event === 'UPDATE') {
+          var d = msg.payload && msg.payload.record;
+          if (d && state.role === 'conseiller' && d.code_conseiller === state.codeConseiller) {
+            afficherNotificationRealtime('🔔 Dossier mis à jour', d.prenom_porteur + ' ' + d.nom_porteur);
+          }
+        }
+      } catch(err) {}
+    };
+
+    _supabaseChannel.onerror = function() {
+      // Silencieux — Realtime optionnel
+    };
+  } catch(e) {
+    // WebSocket non supporté ou erreur réseau
+  }
+}
+
+function afficherNotificationRealtime(titre, message) {
+  var notif = document.createElement('div');
+  notif.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#1a2224;color:white;border-radius:12px;padding:14px 18px;box-shadow:0 8px 32px rgba(0,0,0,0.3);z-index:9999;max-width:320px;animation:slideIn 0.3s ease';
+  notif.innerHTML = '<div style="font-size:13px;font-weight:700;margin-bottom:4px">' + titre + '</div>'
+    + '<div style="font-size:12px;opacity:0.8">' + message + '</div>';
+  document.body.appendChild(notif);
+  setTimeout(function(){ notif.remove(); }, 5000);
+}
+
+// Initialiser realtime après login
+window.addEventListener('load', function() {
+  setTimeout(function() {
+    if (state.role === 'conseiller' || state.role === 'coordinateur') {
+      initSupabaseRealtime();
+    }
+  }, 2000);
+});
+
+// ============================================================
+// 9. MODE HORS-LIGNE AMÉLIORÉ
+// ============================================================
+
+var _horsLigne     = false;
+var _actionsPendantes = [];
+
+window.addEventListener('online', function() {
+  _horsLigne = false;
+  var indicator = document.getElementById('horsLigneIndicator');
+  if (indicator) indicator.remove();
+  // Synchroniser les actions en attente
+  if (_actionsPendantes.length > 0) {
+    synchroActionsEnAttente();
+  }
+});
+
+window.addEventListener('offline', function() {
+  _horsLigne = true;
+  if (!document.getElementById('horsLigneIndicator')) {
+    var el = document.createElement('div');
+    el.id  = 'horsLigneIndicator';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#856404;color:white;text-align:center;padding:6px;font-size:12px;font-weight:700;z-index:9998';
+    el.textContent = '📶 Hors ligne — les données sont sauvegardées localement et seront synchronisées à la reconnexion';
+    document.body.appendChild(el);
+  }
+});
+
+async function synchroActionsEnAttente() {
+  if (_actionsPendantes.length === 0) return;
+  showSaveIndicator('🔄 Synchronisation en cours...');
+  var pending = _actionsPendantes.slice();
+  _actionsPendantes = [];
+  for (var i = 0; i < pending.length; i++) {
+    try {
+      await supabaseApi(pending[i].action, pending[i].data);
+    } catch(e) {
+      _actionsPendantes.push(pending[i]); // Remettre en file si échec
+    }
+  }
+  if (_actionsPendantes.length === 0) {
+    showSaveIndicator('✅ Synchronisation terminée');
+  }
+}
+
+// ============================================================
+// 10. INTÉGRATIONS UI
+// ============================================================
+
+// Ajouter bouton Comparer et Export Word dans le dashboard conseiller
+var _origRenderDashboard2 = renderDashboard;
+renderDashboard = function() {
+  _origRenderDashboard2();
+  setTimeout(function() {
+    var header = document.querySelector('.dashboard-header');
+    if (!header || header.querySelector('.btn-comparer')) return;
+    var btns = header.querySelector('div');
+    if (btns) {
+      var btnComp = document.createElement('button');
+      btnComp.className = 'btn btn-secondary btn-sm btn-comparer';
+      btnComp.textContent = '🔀 Comparer';
+      btnComp.onclick = ouvrirComparaisonDossiers;
+      btns.appendChild(btnComp);
+    }
+  }, 100);
+};
+
+// Ajouter bouton Export Word dans la synthèse conseiller
+var _origShowSynthese2 = showSynthese;
+showSynthese = async function() {
+  await _origShowSynthese2();
+  setTimeout(function() {
+    var btns = document.querySelector('#viewSynthese .main-content > div:first-child > div');
+    if (btns && !btns.querySelector('.btn-word')) {
+      var btn = document.createElement('button');
+      btn.className = 'btn btn-secondary btn-sm btn-word';
+      btn.innerHTML = '📝 Export Word';
+      btn.onclick = exporterDiagnosticWord;
+      btns.appendChild(btn);
+    }
+    // Ajouter bouton email porteur
+    if (btns && !btns.querySelector('.btn-email-porteur')) {
+      var btnEmail = document.createElement('button');
+      btnEmail.className = 'btn btn-secondary btn-sm btn-email-porteur';
+      btnEmail.innerHTML = '📧 Email porteur';
+      btnEmail.onclick = function() { envoyerEmailCodePorteur(state.dossier && state.dossier.id); };
+      btns.appendChild(btnEmail);
+    }
+  }, 200);
+};
+
+
+
+// ============================================================
+// AMÉLIORATIONS V3
+// ============================================================
+// ============================================================
+// AMÉLIORATIONS V3 — Toutes les fonctionnalités restantes
+// ============================================================
+
+// ============================================================
+// 3. RÉINITIALISATION DE CODE PORTEUR
+// ============================================================
+
+async function reinitialiserCodePorteur(dossierId) {
+  if (!confirm('Générer un nouveau code pour ce porteur ?\nL\'ancien code ne fonctionnera plus.')) return;
+  var nouveauCode = randomCode(6);
+  try {
+    await sbPatch('dossiers', { 'id': 'eq.' + dossierId }, {
+      code_porteur: nouveauCode,
+      date_modification: new Date().toISOString()
+    });
+    if (state.dossier && state.dossier.id === dossierId) {
+      state.dossier.codePorteur = nouveauCode;
+    }
+    // Mettre à jour localStorage aussi
+    var stored = JSON.parse(localStorage.getItem('amesud_demo') || '{"dossiers":{}}');
+    if (stored.dossiers[dossierId]) {
+      stored.dossiers[dossierId].codePorteur = nouveauCode;
+      localStorage.setItem('amesud_demo', JSON.stringify(stored));
+    }
+    alert('✅ Nouveau code porteur : ' + nouveauCode + '\n\nCommuniquez ce code au porteur.');
+    showSaveIndicator('✅ Code porteur réinitialisé');
+    if (typeof renderConseillerDossier === 'function') renderConseillerDossier();
+  } catch(e) {
+    alert('Erreur : ' + e.message);
+  }
+}
+
+// ============================================================
+// 4. AGENDA DES RDV
+// ============================================================
+
+function ouvrirAgendaRDV() {
+  var existing = document.getElementById('agendaOverlay');
+  if (existing) { existing.remove(); return; }
+
+  // Collecter tous les RDV de tous les dossiers
+  var tousRDV = [];
+  var dossiers = state.dossiers || [];
+
+  dossiers.forEach(function(d) {
+    try {
+      var rdvRaw = localStorage.getItem('rdv_' + d.id);
+      var rdvList = rdvRaw ? JSON.parse(rdvRaw) : [];
+      rdvList.forEach(function(rdv, i) {
+        if (rdv.date) {
+          tousRDV.push({
+            date:         rdv.date,
+            objet:        rdv.objet || 'RDV ' + (i+1),
+            statut:       rdv.statut || 'planifie',
+            porteur:      d.prenomPorteur + ' ' + d.nomPorteur,
+            nomProjet:    d.nomProjet || '—',
+            dossierId:    d.id,
+            signe:        !!(rdv.signatureCanvas || rdv.signatureNom),
+          });
+        }
+      });
+    } catch(e) {}
+  });
+
+  // Trier par date
+  tousRDV.sort(function(a,b){ return a.date.localeCompare(b.date); });
+
+  // Séparer passés / à venir
+  var maintenant = new Date().toISOString().slice(0,10);
+  var avenir  = tousRDV.filter(function(r){ return r.date >= maintenant; });
+  var passes  = tousRDV.filter(function(r){ return r.date < maintenant; });
+
+  function rdvRow(r) {
+    var statColor = r.statut==='realise' ? '#1a8a4a' : r.statut==='en_cours' ? '#0891b2' : '#856404';
+    var statBg    = r.statut==='realise' ? '#f0faf5'  : r.statut==='en_cours' ? '#e0f2fe'  : '#fffbf0';
+    var statLabel = { planifie:'Planifié', en_cours:'En cours', realise:'Réalisé' }[r.statut] || 'Planifié';
+    return '<div onclick="document.getElementById(\'agendaOverlay\').remove();ouvrirDossier(\'' + r.dossierId + '\');switchConseillerTab(\'synthese\')" style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--bord);cursor:pointer;transition:background 0.15s" onmouseover="this.style.background=\'var(--vert-pale)\'" onmouseout="this.style.background=\'\'">'
+      + '<div style="text-align:center;min-width:44px;flex-shrink:0">'
+      +   '<div style="font-size:18px;font-weight:800;color:var(--vert)">' + new Date(r.date).toLocaleDateString('fr-FR',{day:'numeric'}) + '</div>'
+      +   '<div style="font-size:10px;color:var(--texte2);text-transform:uppercase">' + new Date(r.date).toLocaleDateString('fr-FR',{month:'short'}) + '</div>'
+      + '</div>'
+      + '<div style="flex:1;min-width:0">'
+      +   '<div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + r.porteur + '</div>'
+      +   '<div style="font-size:11px;color:var(--texte2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + r.objet + '</div>'
+      + '</div>'
+      + '<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">'
+      +   (r.signe ? '<span style="font-size:10px">✍️</span>' : '')
+      +   '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:' + statBg + ';color:' + statColor + '">' + statLabel + '</span>'
+      + '</div>'
+      + '</div>';
+  }
+
+  var overlay = document.createElement('div');
+  overlay.id  = 'agendaOverlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = function(e){ if(e.target===overlay) overlay.remove(); };
+
+  overlay.innerHTML = '<div style="background:white;border-radius:var(--r);width:100%;max-width:560px;max-height:80vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.2);display:flex;flex-direction:column">'
+    + '<div style="padding:18px 24px;border-bottom:1.5px solid var(--bord);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+    +   '<div><h3 style="font-size:17px;font-weight:800">📅 Agenda des rendez-vous</h3>'
+    +   '<p style="font-size:12px;color:var(--texte2)">' + tousRDV.length + ' RDV planifiés · ' + avenir.length + ' à venir</p></div>'
+    +   '<button onclick="document.getElementById(\'agendaOverlay\').remove()" style="border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--texte2)">×</button>'
+    + '</div>'
+    + '<div style="overflow-y:auto;flex:1">'
+    + (avenir.length > 0
+        ? '<div style="padding:10px 16px 6px;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--vert);letter-spacing:0.5px">À venir (' + avenir.length + ')</div>'
+          + avenir.map(rdvRow).join('')
+        : '<div style="padding:20px;text-align:center;color:var(--texte2);font-size:13px">Aucun RDV à venir</div>')
+    + (passes.length > 0
+        ? '<div style="padding:10px 16px 6px;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--texte2);letter-spacing:0.5px">Passés (' + passes.length + ')</div>'
+          + passes.slice(0,5).map(rdvRow).join('')
+        : '')
+    + '</div>'
+    + '</div>';
+
+  document.body.appendChild(overlay);
+}
+
+// ============================================================
+// 5. RELANCE AUTOMATIQUE
+// ============================================================
+
+function verifierRelancesAutomatiques() {
+  var dossiers = state.dossiers || [];
+  var maintenant = new Date();
+  var relances = [];
+
+  dossiers.forEach(function(d) {
+    if (d.statut === 'Archivé' || d.statut === 'Validé') return;
+    var derniereMAJ = d.dateModification ? new Date(d.dateModification) : null;
+    if (!derniereMAJ) return;
+    var joursInactif = Math.floor((maintenant - derniereMAJ) / (1000*60*60*24));
+    if (joursInactif >= 7 && joursInactif < 30) {
+      relances.push({ dossier: d, jours: joursInactif, urgence: 'normale' });
+    } else if (joursInactif >= 30) {
+      relances.push({ dossier: d, jours: joursInactif, urgence: 'haute' });
+    }
+  });
+
+  if (relances.length === 0) return;
+
+  // Afficher une notification discrète
+  var notif = document.getElementById('relanceNotif');
+  if (!notif) {
+    notif = document.createElement('div');
+    notif.id = 'relanceNotif';
+    notif.style.cssText = 'position:fixed;bottom:24px;left:24px;background:white;border:2px solid #f39c12;border-radius:12px;padding:14px 18px;box-shadow:0 8px 32px rgba(0,0,0,0.15);z-index:999;max-width:300px;cursor:pointer';
+    notif.onclick = function() { notif.remove(); afficherRelances(relances); };
+    document.body.appendChild(notif);
+  }
+  notif.innerHTML = '<div style="display:flex;align-items:center;gap:10px">'
+    + '<span style="font-size:22px">⏰</span>'
+    + '<div>'
+    +   '<div style="font-size:13px;font-weight:700">' + relances.length + ' porteur(s) à relancer</div>'
+    +   '<div style="font-size:11px;color:var(--texte2)">Cliquez pour voir le détail</div>'
+    + '</div></div>';
+}
+
+function afficherRelances(relances) {
+  var rows = relances.map(function(r) {
+    var couleur = r.urgence === 'haute' ? '#c0392b' : '#856404';
+    return '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--bord)">'
+      + '<div style="flex:1">'
+      +   '<div style="font-size:13px;font-weight:700">' + r.dossier.prenomPorteur + ' ' + r.dossier.nomPorteur + '</div>'
+      +   '<div style="font-size:11px;color:var(--texte2)">' + (r.dossier.nomProjet||'—') + '</div>'
+      + '</div>'
+      + '<div style="text-align:right;flex-shrink:0">'
+      +   '<div style="font-size:12px;font-weight:700;color:' + couleur + '">' + r.jours + ' jours</div>'
+      +   '<div style="font-size:10px;color:var(--texte2)">sans activité</div>'
+      + '</div>'
+      + '<button onclick="envoyerEmailCodePorteur(\'' + r.dossier.id + '\')" title="Envoyer relance" style="border:1.5px solid var(--bord);border-radius:6px;padding:5px 10px;background:white;cursor:pointer;font-size:12px">📧</button>'
+      + '</div>';
+  }).join('');
+
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = function(e){ if(e.target===overlay) overlay.remove(); };
+  overlay.innerHTML = '<div style="background:white;border-radius:var(--r);width:100%;max-width:480px;max-height:70vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.2);display:flex;flex-direction:column">'
+    + '<div style="padding:18px 24px;border-bottom:1.5px solid var(--bord);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+    +   '<h3 style="font-size:16px;font-weight:800">⏰ Porteurs à relancer</h3>'
+    +   '<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--texte2)">×</button>'
+    + '</div>'
+    + '<div style="overflow-y:auto;flex:1">' + rows + '</div>'
+    + '</div>';
+  document.body.appendChild(overlay);
+}
+
+// ============================================================
+// 6. SCORE ÉVALUATION DANS LA VUE COORDINATEUR
+// ============================================================
+
+function getScoreEvaluation(dossierId) {
+  try {
+    var ev = localStorage.getItem('eval_' + dossierId);
+    if (!ev) return null;
+    var data = JSON.parse(ev);
+    return data.scoreGlobal || null;
+  } catch(e) { return null; }
+}
+
+// ============================================================
+// 7. ONBOARDING PORTEUR
+// ============================================================
+
+function afficherOnboardingPorteur() {
+  // N'afficher qu'à la première connexion
+  var vu = localStorage.getItem('onboarding_vu_' + (state.dossier && state.dossier.id));
+  if (vu) return;
+
+  var etapes = [
+    { icon: '📋', titre: 'Bienvenue dans votre diagnostic !', texte: 'Votre conseiller AMESUD a créé cet espace pour vous accompagner dans la création de votre entreprise. Vous allez répondre à des questions sur votre projet, votre marché et votre plan financier.', btn: 'Commencer →' },
+    { icon: '🗂️', titre: '8 sections à compléter', texte: 'Le diagnostic est organisé en 8 sections : Profil, Projet, Marché, Offre, Moyens, Finances, Juridique et Communication. Puis un module financier. Répondez à votre rythme — tout est sauvegardé automatiquement.', btn: 'Suivant →' },
+    { icon: '💡', titre: 'Des guides pour vous aider', texte: 'Sur chaque section, un bouton 📖 Guide pédagogique vous donne des conseils pratiques adaptés à votre situation. Consultez-le avant de répondre !', btn: 'C\'est parti ! 🚀' },
+  ];
+
+  var etapeActuelle = 0;
+
+  function renderEtape(i) {
+    var e = etapes[i];
+    var overlay = document.getElementById('onboardingOverlay');
+    if (!overlay) return;
+    overlay.querySelector('.onboarding-content').innerHTML = '<div style="text-align:center;padding:32px 28px">'
+      + '<div style="font-size:56px;margin-bottom:16px">' + e.icon + '</div>'
+      + '<h3 style="font-size:20px;font-weight:800;margin-bottom:12px;color:var(--vert)">' + e.titre + '</h3>'
+      + '<p style="font-size:14px;color:var(--texte);line-height:1.8;margin-bottom:28px">' + e.texte + '</p>'
+      + '<div style="display:flex;gap:6px;justify-content:center;margin-bottom:20px">'
+      + etapes.map(function(_,j){ return '<div style="width:8px;height:8px;border-radius:50%;background:' + (j===i?'var(--vert)':'var(--bord)') + '"></div>'; }).join('')
+      + '</div>'
+      + '<button onclick="avancerOnboarding(' + i + ')" style="padding:13px 32px;border:none;border-radius:8px;background:var(--vert);color:white;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer">' + e.btn + '</button>'
+      + '</div>';
+  }
+
+  window.avancerOnboarding = function(i) {
+    if (i < etapes.length - 1) {
+      etapeActuelle = i + 1;
+      renderEtape(etapeActuelle);
+    } else {
+      localStorage.setItem('onboarding_vu_' + (state.dossier && state.dossier.id), '1');
+      document.getElementById('onboardingOverlay').remove();
+    }
+  };
+
+  var overlay = document.createElement('div');
+  overlay.id  = 'onboardingOverlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+
+  overlay.innerHTML = '<div style="background:white;border-radius:var(--r);width:100%;max-width:480px;box-shadow:0 20px 60px rgba(0,0,0,0.25);overflow:hidden">'
+    + '<div style="background:linear-gradient(135deg,var(--vert),#1a7a7c);padding:16px 20px;display:flex;align-items:center;justify-content:space-between">'
+    +   '<div style="display:flex;align-items:center;gap:8px;color:white;font-size:13px;font-weight:700">🌿 AMESUD · Diagnostic Création</div>'
+    +   '<button onclick="localStorage.setItem(\'onboarding_vu_\'+\'' + (state.dossier&&state.dossier.id) + '\',\'1\');this.closest(\'#onboardingOverlay\').remove()" style="border:none;background:rgba(255,255,255,0.2);color:white;border-radius:20px;padding:3px 10px;font-size:11px;cursor:pointer">Passer</button>'
+    + '</div>'
+    + '<div class="onboarding-content"></div>'
+    + '</div>';
+
+  document.body.appendChild(overlay);
+  renderEtape(0);
+}
+
+// Déclencher l'onboarding à la connexion porteur
+var _origShowPorteurView2 = showPorteurView;
+showPorteurView = function() {
+  _origShowPorteurView2();
+  setTimeout(afficherOnboardingPorteur, 400);
+};
+
+// ============================================================
+// 8. MODE IMPRESSION OPTIMISÉ
+// ============================================================
+(function() {
+  var printCSS = document.createElement('style');
+  printCSS.textContent = '@media print {'
+    + '.sidebar, .header, .section-nav-bottom, .section-actions,'
+    + '.btn, .main-tabs, #sidebarToggle, #sidebarOverlay,'
+    + '.fin-card-header button, #finSectionHeader button,'
+    + '.dashboard-header button, .dash-filters, .note-conseiller-global button,'
+    + '#headerSearchBtn, .porteur-export-btn, .btn-revision {'
+    +   'display:none !important;'
+    + '}'
+    + '.app-layout { grid-template-columns: 1fr !important; }'
+    + '.main-content, #sectionContent { padding: 0 !important; }'
+    + '.question-card { break-inside: avoid; page-break-inside: avoid; border: 1px solid #ddd !important; }'
+    + '.section-header { break-after: avoid; }'
+    + 'body { font-size: 11pt; }'
+    + '.progress-bar-wrap { display: none; }'
+    + '@page { margin: 15mm; size: A4; }'
+    + '}';
+  document.head.appendChild(printCSS);
+})();
+
+// ============================================================
+// 9. RACCOURCIS CLAVIER
+// ============================================================
+
+document.addEventListener('keydown', function(e) {
+  // Ignorer si on est dans un input/textarea
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+
+  // Ctrl+S ou Cmd+S — sauvegarder
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    if (state.role === 'porteur' && typeof saveCurrentSection === 'function') {
+      saveCurrentSection(false).then(function() {
+        showSaveIndicator('💾 Sauvegardé (Ctrl+S)');
+      });
+    } else if ((state.role === 'conseiller' || state.role === 'coord_dossier') && typeof saveCurrentSection === 'function') {
+      saveCurrentSection(true).then(function() {
+        showSaveIndicator('💾 Sauvegardé (Ctrl+S)');
+      });
+    }
+    return;
+  }
+
+  // Ctrl+F ou Cmd+F — recherche globale
+  if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+    e.preventDefault();
+    if (state.role === 'conseiller' || state.role === 'coordinateur') {
+      ouvrirRechercheGlobale();
+    }
+    return;
+  }
+
+  // Échap — fermer les modales
+  if (e.key === 'Escape') {
+    var modales = ['rechercheOverlay','importJSONOverlay','modelesPlanOverlay',
+                   'signatureOverlay','revisionOverlay','maturiteOverlay',
+                   'comparaisonOverlay','comparaisonResultatOverlay',
+                   'agendaOverlay','onboardingOverlay','gestionConseillersOverlay',
+                   'logsOverlay'];
+    for (var i = 0; i < modales.length; i++) {
+      var el = document.getElementById(modales[i]);
+      if (el) { el.remove(); return; }
+    }
+  }
+
+  // Flèche droite/gauche — navigation sections (porteur)
+  if (state.role === 'porteur' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.key === 'ArrowRight') { navSection(1); }
+    if (e.key === 'ArrowLeft')  { navSection(-1); }
+  }
+});
+
+// ============================================================
+// 10. PAGINATION DES DOSSIERS
+// ============================================================
+
+var _dashPage = 1;
+var _dashParPage = 20;
+
+var _origRenderDashboard3 = renderDashboard;
+renderDashboard = function() {
+  _dashPage = 1; // reset page à chaque rechargement
+  _origRenderDashboard3();
+};
+
+function getDossiersPagines(filtered) {
+  var debut = (_dashPage - 1) * _dashParPage;
+  return filtered.slice(debut, debut + _dashParPage);
+}
+
+function renderPagination(total, filtered) {
+  var nbPages = Math.ceil(filtered.length / _dashParPage);
+  if (nbPages <= 1) return '';
+  var btns = '';
+  for (var p = 1; p <= nbPages; p++) {
+    btns += '<button onclick="_dashPage=' + p + ';renderDashboard()" style="'
+      + 'padding:5px 10px;border:1.5px solid ' + (p===_dashPage?'var(--vert)':'var(--bord)') + ';'
+      + 'border-radius:6px;background:' + (p===_dashPage?'var(--vert)':'white') + ';'
+      + 'color:' + (p===_dashPage?'white':'var(--texte2)') + ';'
+      + 'font-family:inherit;font-size:12px;cursor:pointer">' + p + '</button>';
+  }
+  return '<div style="display:flex;gap:6px;align-items:center;justify-content:center;padding:16px">'
+    + '<span style="font-size:12px;color:var(--texte2)">Page ' + _dashPage + '/' + nbPages + ' · ' + filtered.length + ' dossiers</span>'
+    + btns + '</div>';
+}
+
+// ============================================================
+// 11. CACHE INTELLIGENT
+// ============================================================
+
+var _cache = {};
+var _CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function cacheGet(key) {
+  var entry = _cache[key];
+  if (!entry) return null;
+  if (Date.now() - entry.ts > _CACHE_TTL) { delete _cache[key]; return null; }
+  return entry.data;
+}
+
+function cacheSet(key, data) {
+  _cache[key] = { data: data, ts: Date.now() };
+}
+
+function cacheInvalidate(key) {
+  if (key) delete _cache[key];
+  else _cache = {};
+}
+
+// Wrapper sbGet avec cache
+var _origSbGet = sbGet;
+sbGet = async function(table, params) {
+  var key = table + ':' + JSON.stringify(params||{});
+  // Ne cacher que les lectures non critiques
+  var cacheable = ['conseillers'].includes(table);
+  if (cacheable) {
+    var cached = cacheGet(key);
+    if (cached) return cached;
+  }
+  var result = await _origSbGet(table, params);
+  if (cacheable) cacheSet(key, result);
+  return result;
+};
+
+// Invalider le cache après écriture
+var _origSbPost = sbPost;
+sbPost = async function(table, body) {
+  cacheInvalidate(table);
+  return _origSbPost(table, body);
+};
+
+var _origSbPatch = sbPatch;
+sbPatch = async function(table, params, body) {
+  cacheInvalidate(table);
+  return _origSbPatch(table, params, body);
+};
+
+// ============================================================
+// 12. VERSIONING DES DONNÉES (snapshots)
+// ============================================================
+
+function sauvegarderSnapshot(dossierId, motif) {
+  try {
+    var snapshots = JSON.parse(localStorage.getItem('snapshots_' + dossierId) || '[]');
+    var stored    = JSON.parse(localStorage.getItem('amesud_demo') || '{"dossiers":{},"reponses":{}}');
+    var snapshot  = {
+      date:     new Date().toISOString(),
+      motif:    motif || 'Sauvegarde automatique',
+      dossier:  stored.dossiers && stored.dossiers[dossierId] ? stored.dossiers[dossierId] : null,
+      reponses: stored.reponses && stored.reponses[dossierId] ? stored.reponses[dossierId] : {},
+    };
+    snapshots.unshift(snapshot);
+    if (snapshots.length > 10) snapshots = snapshots.slice(0, 10); // max 10 snapshots
+    localStorage.setItem('snapshots_' + dossierId, JSON.stringify(snapshots));
+  } catch(e) {}
+}
+
+function afficherSnapshots(dossierId) {
+  var snapshots = JSON.parse(localStorage.getItem('snapshots_' + dossierId) || '[]');
+  if (snapshots.length === 0) { alert('Aucun snapshot disponible pour ce dossier.'); return; }
+
+  var rows = snapshots.map(function(s, i) {
+    var nbRep = Object.keys(s.reponses || {}).length;
+    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--bord)">'
+      + '<div style="flex:1">'
+      +   '<div style="font-size:12px;font-weight:700">' + new Date(s.date).toLocaleString('fr-FR') + '</div>'
+      +   '<div style="font-size:11px;color:var(--texte2)">' + (s.motif||'—') + ' · ' + nbRep + ' réponse(s)</div>'
+      + '</div>'
+      + '<button onclick="restaurerSnapshot(\'' + dossierId + '\',' + i + ')" style="border:1.5px solid var(--bord);border-radius:6px;padding:5px 10px;background:white;cursor:pointer;font-size:11px">↩ Restaurer</button>'
+      + '</div>';
+  }).join('');
+
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:1001;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = function(e){ if(e.target===overlay) overlay.remove(); };
+  overlay.innerHTML = '<div style="background:white;border-radius:var(--r);width:100%;max-width:480px;max-height:70vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.2);display:flex;flex-direction:column">'
+    + '<div style="padding:18px 24px;border-bottom:1.5px solid var(--bord);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+    +   '<h3 style="font-size:16px;font-weight:800">⏱️ Historique des versions</h3>'
+    +   '<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--texte2)">×</button>'
+    + '</div>'
+    + '<div style="overflow-y:auto;flex:1">' + rows + '</div>'
+    + '</div>';
+  document.body.appendChild(overlay);
+}
+
+function restaurerSnapshot(dossierId, idx) {
+  if (!confirm('Restaurer cette version ? Les données actuelles seront remplacées.')) return;
+  var snapshots = JSON.parse(localStorage.getItem('snapshots_' + dossierId) || '[]');
+  var snap = snapshots[idx];
+  if (!snap) return;
+  var stored = JSON.parse(localStorage.getItem('amesud_demo') || '{"dossiers":{},"reponses":{}}');
+  if (snap.dossier) stored.dossiers[dossierId] = snap.dossier;
+  if (snap.reponses) stored.reponses[dossierId] = snap.reponses;
+  localStorage.setItem('amesud_demo', JSON.stringify(stored));
+  document.querySelector('div[style*=fixed]')?.remove();
+  showSaveIndicator('✅ Version restaurée');
+  if (typeof renderConseillerDossier === 'function') renderConseillerDossier();
+}
+
+// Snapshot automatique à chaque validation de section
+var _origValiderSection2 = validerSection;
+validerSection = function(sectionId) {
+  if (state.dossier) sauvegarderSnapshot(state.dossier.id, 'Validation section ' + sectionId);
+  _origValiderSection2(sectionId);
+};
+
+// ============================================================
+// INTÉGRATIONS UI — Ajouter les boutons dans l'interface
+// ============================================================
+
+// Bouton Agenda dans le header conseiller
+var _origShowConseillerView = showConseillerView;
+showConseillerView = function() {
+  _origShowConseillerView();
+  setTimeout(function() {
+    var searchBtn = document.getElementById('headerSearchBtn');
+    if (searchBtn && !document.getElementById('agendaBtn')) {
+      var btn = document.createElement('button');
+      btn.id = 'agendaBtn';
+      btn.textContent = '📅';
+      btn.title = 'Agenda des RDV (Alt+A)';
+      btn.style.cssText = 'padding:5px 10px;border:1.5px solid rgba(255,255,255,0.3);border-radius:20px;background:transparent;color:white;font-size:13px;cursor:pointer;margin-right:4px';
+      btn.onclick = ouvrirAgendaRDV;
+      searchBtn.parentNode.insertBefore(btn, searchBtn);
+    }
+    // Vérifier les relances après login
+    setTimeout(verifierRelancesAutomatiques, 1500);
+  }, 300);
+};
+
+// Bouton réinitialiser code dans le dossier conseiller
+var _origRenderConseillerDossier = renderConseillerDossier;
+renderConseillerDossier = function() {
+  _origRenderConseillerDossier();
+  setTimeout(function() {
+    if (!state.dossier) return;
+    var header = document.querySelector('.conseiller-header');
+    if (!header || header.querySelector('.btn-reinit-code')) return;
+    var btn = document.createElement('button');
+    btn.className = 'btn btn-secondary btn-sm btn-reinit-code';
+    btn.textContent = '🔑 Nouveau code porteur';
+    btn.title = 'Générer un nouveau code d\'accès pour le porteur';
+    btn.onclick = function() { reinitialiserCodePorteur(state.dossier.id); };
+    header.appendChild(btn);
+
+    // Bouton snapshots
+    var btn2 = document.createElement('button');
+    btn2.className = 'btn btn-secondary btn-sm';
+    btn2.textContent = '⏱️ Versions';
+    btn2.title = 'Historique des versions de ce dossier';
+    btn2.onclick = function() { afficherSnapshots(state.dossier.id); };
+    header.appendChild(btn2);
+  }, 200);
+};
+
+// Raccourci Alt+A pour l'agenda
+document.addEventListener('keydown', function(e) {
+  if (e.altKey && e.key === 'a' && (state.role === 'conseiller' || state.role === 'coord_dossier')) {
+    e.preventDefault();
+    ouvrirAgendaRDV();
+  }
+});
+
 </script>
 </body>
 </html>
