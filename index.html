@@ -2700,7 +2700,7 @@ async function loginConseiller() {
       return;
     }
 
-    // 2. Récupérer le profil conseiller via auth_id
+    // 2. Récupérer le profil — conseiller OU coordinateur
     var userId = authData.user && authData.user.id;
     var conseillerRes = await sbGet('conseillers', {
       'auth_id': 'eq.' + userId,
@@ -2716,12 +2716,16 @@ async function loginConseiller() {
 
     var conseiller = conseillerRes[0];
 
-    // 3. Si coordinateur → rediriger vers coordinateur
+    // 3. Si coordinateur → vue coordinateur
     if (conseiller.role === 'coordinateur') {
+      state.role      = 'coordinateur';
+      state.authToken = authData.access_token;
+      state.coordCode = conseiller.code;
+      var res2 = await api('loginCoordinateur', { code: conseiller.code });
+      state.coordData = res2;
       hideLoading();
-      document.getElementById('emailCoordinateurInput').value = email;
-      document.getElementById('mdpCoordinateurInput').value   = mdp;
-      await loginCoordinateur();
+      loggerConnexion('coordinateur', email);
+      showCoordinateurView();
       return;
     }
 
@@ -6469,23 +6473,31 @@ async function loginCoordinateur() {
     var userId = authData.user && authData.user.id;
     var coordRes = await sbGet('conseillers', {
       'auth_id': 'eq.' + userId,
-      'role':    'eq.coordinateur',
       'actif':   'eq.true',
       'select':  '*',
     });
 
     if (!coordRes || coordRes.length === 0) {
       hideLoading();
-      showAlert('alertCoordinateur', 'Accès non autorisé. Ce compte n\'a pas les droits coordinateur.');
+      showAlert('alertCoordinateur', 'Compte non autorisé.');
+      return;
+    }
+
+    // Prendre la ligne coordinateur si elle existe, sinon la première
+    var coord = coordRes.find(function(c){ return c.role === 'coordinateur'; }) || coordRes[0];
+
+    if (coord.role !== 'coordinateur') {
+      hideLoading();
+      showAlert('alertCoordinateur', 'Ce compte n\'a pas les droits coordinateur.');
       return;
     }
 
     // 3. Charger tous les dossiers
     state.role      = 'coordinateur';
     state.authToken = authData.access_token;
-    state.coordCode = coordRes[0].code;
+    state.coordCode = coord.code;
 
-    var res = await api('loginCoordinateur', { code: coordRes[0].code });
+    var res = await api('loginCoordinateur', { code: coord.code });
     state.coordData = res;
 
     hideLoading();
