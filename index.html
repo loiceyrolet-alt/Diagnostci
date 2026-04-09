@@ -2181,29 +2181,57 @@
   <!-- Login Conseiller -->
   <div id="loginConseiller" class="login-card" style="display:none">
     <h2>Espace conseiller</h2>
-    <p class="subtitle">Utilisez votre code conseiller pour accéder à vos dossiers. Ce code est commun à tous vos dossiers.</p>
+    <p class="subtitle">Connectez-vous avec votre email et mot de passe AMESUD.</p>
     <div id="alertConseiller"></div>
     <div class="form-group">
-      <label>Votre code conseiller</label>
-      <input type="text" id="codeConseillerInput" class="code-input" maxlength="8" placeholder="XXXXXXXX" oninput="this.value=this.value.toUpperCase()">
+      <label>Email</label>
+      <input type="email" id="emailConseillerInput" class="form-control" placeholder="votre@email.fr"
+        style="width:100%;padding:12px 16px;border:1.5px solid var(--bord);border-radius:8px;font-family:inherit;font-size:15px"
+        onkeydown="if(event.key==='Enter') loginConseiller()">
+    </div>
+    <div class="form-group">
+      <label>Mot de passe</label>
+      <div style="position:relative">
+        <input type="password" id="mdpConseillerInput" class="form-control" placeholder="••••••••"
+          style="width:100%;padding:12px 16px;border:1.5px solid var(--bord);border-radius:8px;font-family:inherit;font-size:15px;padding-right:44px"
+          onkeydown="if(event.key==='Enter') loginConseiller()">
+        <button onclick="toggleMdp('mdpConseillerInput')" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);border:none;background:transparent;cursor:pointer;color:var(--texte2);font-size:16px">👁</button>
+      </div>
     </div>
     <button class="btn btn-primary" onclick="loginConseiller()">
       Accéder à mes dossiers →
     </button>
+    <div style="margin-top:12px;text-align:center">
+      <button onclick="motDePasseOublie('conseiller')" style="border:none;background:transparent;color:var(--vert);font-family:inherit;font-size:12px;cursor:pointer;text-decoration:underline">Mot de passe oublié ?</button>
+    </div>
   </div>
 
   <!-- Login Coordinateur -->
   <div id="loginCoordinateur" class="login-card" style="display:none">
     <h2>Espace coordinateur</h2>
-    <p class="subtitle">Accès global à tous les dossiers et conseillers AMESUD. Code confidentiel à 10 caractères.</p>
+    <p class="subtitle">Connectez-vous avec votre email et mot de passe coordinateur.</p>
     <div id="alertCoordinateur"></div>
     <div class="form-group">
-      <label>Code coordinateur</label>
-      <input type="text" id="codeCoordinateurInput" class="code-input" maxlength="10" placeholder="XXXXXXXXXX" oninput="this.value=this.value.toUpperCase()">
+      <label>Email</label>
+      <input type="email" id="emailCoordinateurInput" class="form-control" placeholder="votre@email.fr"
+        style="width:100%;padding:12px 16px;border:1.5px solid var(--bord);border-radius:8px;font-family:inherit;font-size:15px"
+        onkeydown="if(event.key==='Enter') loginCoordinateur()">
+    </div>
+    <div class="form-group">
+      <label>Mot de passe</label>
+      <div style="position:relative">
+        <input type="password" id="mdpCoordinateurInput" class="form-control" placeholder="••••••••"
+          style="width:100%;padding:12px 16px;border:1.5px solid var(--bord);border-radius:8px;font-family:inherit;font-size:15px;padding-right:44px"
+          onkeydown="if(event.key==='Enter') loginCoordinateur()">
+        <button onclick="toggleMdp('mdpCoordinateurInput')" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);border:none;background:transparent;cursor:pointer;color:var(--texte2);font-size:16px">👁</button>
+      </div>
     </div>
     <button class="btn btn-primary" onclick="loginCoordinateur()">
       Accéder au tableau de bord →
     </button>
+    <div style="margin-top:12px;text-align:center">
+      <button onclick="motDePasseOublie('coordinateur')" style="border:none;background:transparent;color:var(--vert);font-family:inherit;font-size:12px;cursor:pointer;text-decoration:underline">Mot de passe oublié ?</button>
+    </div>
   </div>
 </div>
 
@@ -2654,20 +2682,63 @@ async function loginPorteur() {
 }
 
 async function loginConseiller() {
-  const code = document.getElementById('codeConseillerInput').value.trim().toUpperCase();
-  if (code.length < 4) { showAlert('alertConseiller','Veuillez saisir votre code conseiller'); return; }
+  var email = (document.getElementById('emailConseillerInput').value || '').trim();
+  var mdp   = (document.getElementById('mdpConseillerInput').value || '').trim();
+  if (!email || !mdp) { showAlert('alertConseiller','Veuillez saisir votre email et mot de passe'); return; }
   showLoading('Connexion...');
   try {
-    const res = await api('loginConseiller', { code });
-    if (!res.ok) { hideLoading(); showAlert('alertConseiller', res.error || 'Code invalide'); return; }
+    // 1. Authentification Supabase Auth
+    var authRes = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY },
+      body: JSON.stringify({ email: email, password: mdp }),
+    });
+    var authData = await authRes.json();
+    if (!authRes.ok || !authData.access_token) {
+      hideLoading();
+      showAlert('alertConseiller', 'Email ou mot de passe incorrect');
+      return;
+    }
 
-    state.role = 'conseiller';
-    state.codeConseiller = code;
+    // 2. Récupérer le profil conseiller via auth_id
+    var userId = authData.user && authData.user.id;
+    var conseillerRes = await sbGet('conseillers', {
+      'auth_id': 'eq.' + userId,
+      'actif':   'eq.true',
+      'select':  '*',
+    });
+
+    if (!conseillerRes || conseillerRes.length === 0) {
+      hideLoading();
+      showAlert('alertConseiller', 'Compte non autorisé. Contactez votre coordinateur.');
+      return;
+    }
+
+    var conseiller = conseillerRes[0];
+
+    // 3. Si coordinateur → rediriger vers coordinateur
+    if (conseiller.role === 'coordinateur') {
+      hideLoading();
+      document.getElementById('emailCoordinateurInput').value = email;
+      document.getElementById('mdpCoordinateurInput').value   = mdp;
+      await loginCoordinateur();
+      return;
+    }
+
+    // 4. Charger les dossiers du conseiller
+    state.role           = 'conseiller';
+    state.codeConseiller = conseiller.code;
+    state.conseillerNom  = (conseiller.prenom || '') + ' ' + (conseiller.nom || '');
+    state.authToken      = authData.access_token;
+
+    var res = await api('loginConseiller', { code: conseiller.code });
     state.dossiers = res.dossiers || [];
 
-    const secRes = await api('getSections');
+    var secRes = await api('getSections');
     state.sections = secRes.sections || [];
+
     hideLoading();
+    loggerConnexion('conseiller', email);
     showConseillerView();
   } catch(e) {
     hideLoading();
@@ -6325,6 +6396,41 @@ function exporterPlanPDF() {
 // Code démo coordinateur
 var COORD_CODE = 'COORD00001';
 
+// Afficher/masquer le mot de passe
+function toggleMdp(inputId) {
+  var input = document.getElementById(inputId);
+  if (!input) return;
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+// Mot de passe oublié
+async function motDePasseOublie(role) {
+  var emailInput = role === 'coordinateur'
+    ? document.getElementById('emailCoordinateurInput')
+    : document.getElementById('emailConseillerInput');
+  var email = emailInput ? emailInput.value.trim() : '';
+
+  if (!email) {
+    email = prompt('Saisissez votre adresse email pour recevoir le lien de réinitialisation :');
+    if (!email) return;
+  }
+
+  try {
+    var res = await fetch(SUPABASE_URL + '/auth/v1/recover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY },
+      body: JSON.stringify({ email: email }),
+    });
+    if (res.ok) {
+      alert('✅ Email envoyé à ' + email + '\n\nVérifiez votre boîte mail et cliquez sur le lien pour définir un nouveau mot de passe.');
+    } else {
+      alert('Erreur lors de l\'envoi. Vérifiez l\'adresse email.');
+    }
+  } catch(e) {
+    alert('Erreur réseau. Réessayez.');
+  }
+}
+
 // switchLoginTab étendu
 function switchLoginTab(tab) {
   document.querySelectorAll('.login-tab').forEach(function(b, i) {
@@ -6341,16 +6447,49 @@ function switchLoginTab(tab) {
 
 // Login coordinateur
 async function loginCoordinateur() {
-  var code = document.getElementById('codeCoordinateurInput').value.trim().toUpperCase();
-  if (code.length < 6) { showAlert('alertCoordinateur', 'Veuillez saisir votre code coordinateur'); return; }
+  var email = (document.getElementById('emailCoordinateurInput').value || '').trim();
+  var mdp   = (document.getElementById('mdpCoordinateurInput').value || '').trim();
+  if (!email || !mdp) { showAlert('alertCoordinateur', 'Veuillez saisir votre email et mot de passe'); return; }
   showLoading('Connexion...');
   try {
-    var res = await api('loginCoordinateur', { code });
-    if (!res.ok) { hideLoading(); showAlert('alertCoordinateur', res.error || 'Code invalide'); return; }
-    state.role = 'coordinateur';
-    state.coordCode = code;
+    // 1. Authentification Supabase Auth
+    var authRes = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY },
+      body: JSON.stringify({ email: email, password: mdp }),
+    });
+    var authData = await authRes.json();
+    if (!authRes.ok || !authData.access_token) {
+      hideLoading();
+      showAlert('alertCoordinateur', 'Email ou mot de passe incorrect');
+      return;
+    }
+
+    // 2. Vérifier que c'est bien un coordinateur
+    var userId = authData.user && authData.user.id;
+    var coordRes = await sbGet('conseillers', {
+      'auth_id': 'eq.' + userId,
+      'role':    'eq.coordinateur',
+      'actif':   'eq.true',
+      'select':  '*',
+    });
+
+    if (!coordRes || coordRes.length === 0) {
+      hideLoading();
+      showAlert('alertCoordinateur', 'Accès non autorisé. Ce compte n\'a pas les droits coordinateur.');
+      return;
+    }
+
+    // 3. Charger tous les dossiers
+    state.role      = 'coordinateur';
+    state.authToken = authData.access_token;
+    state.coordCode = coordRes[0].code;
+
+    var res = await api('loginCoordinateur', { code: coordRes[0].code });
     state.coordData = res;
+
     hideLoading();
+    loggerConnexion('coordinateur', email);
     showCoordinateurView();
   } catch(e) {
     hideLoading();
