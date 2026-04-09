@@ -2700,11 +2700,12 @@ async function loginConseiller() {
       return;
     }
 
-    // 2. Récupérer le profil — conseiller OU coordinateur
+    // 2. Récupérer le profil — par email
     var userId = authData.user && authData.user.id;
+    var userEmail = authData.user && authData.user.email;
     var conseillerRes = await sbGet('conseillers', {
-      'auth_id': 'eq.' + userId,
-      'select':  '*',
+      'email':  'eq.' + userEmail,
+      'select': '*',
     });
 
     if (!conseillerRes || conseillerRes.length === 0) {
@@ -6468,13 +6469,14 @@ async function loginCoordinateur() {
       return;
     }
 
-    // 2. Vérifier que c'est bien un coordinateur
+    // 2. Récupérer le profil via email
     var userId = authData.user && authData.user.id;
-    console.log('[AMESUD] Auth OK — userId:', userId);
+    var userEmail = authData.user && authData.user.email;
+    console.log('[AMESUD] Auth OK — userId:', userId, 'email:', userEmail);
 
     var coordRes = await sbGet('conseillers', {
-      'auth_id': 'eq.' + userId,
-      'select':  '*',
+      'email':  'eq.' + userEmail,
+      'select': '*',
     });
     console.log('[AMESUD] conseillers trouvés:', JSON.stringify(coordRes));
 
